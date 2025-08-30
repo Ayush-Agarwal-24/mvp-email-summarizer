@@ -59,6 +59,7 @@ def summarize(text: str, category: str | None = None, longer: bool = False) -> s
     s = ""
     if isinstance(base, list) and base and "summary_text" in base[0]:
         s = base[0]["summary_text"].strip()
+        s = re.sub(r"<[^>]+>", "", s)
     cat = (category or "").strip().lower()
     if cat in {"newsletter", "notification"}:
         rewrite = (
@@ -66,7 +67,7 @@ def summarize(text: str, category: str | None = None, longer: bool = False) -> s
             "Use specific, non-redundant points; avoid greetings and subject repetition.\n"
             + bullet_hint + " Neutral, informative tone.\n"
             "Sections: Highlights, Key Updates, What Changed, Links/Actions.\n\n"
-            "Email:\n<<<\n" + (text or "")[:2000] + "\n>>>\n\n"
+            "Email:\n<<<\n" + t[:2000] + "\n>>>\n\n"
             "Base summary:\n<<<\n" + s + "\n>>>\n"
         )
     else:
@@ -75,17 +76,18 @@ def summarize(text: str, category: str | None = None, longer: bool = False) -> s
             "Use bullet points and clear headings. Do not repeat the subject.\n"
             "Sections: Summary, Key Actions, Dates/Deadlines, Decision Needed.\n"
             + bullet_hint + "\n\n"
-            "Email:\n<<<\n" + (text or "")[:2000] + "\n>>>\n\n"
+            "Email:\n<<<\n" + t[:2000] + "\n>>>\n\n"
             "Base summary:\n<<<\n" + s + "\n>>>\n"
         )
     res = hf_post(EXTRACTOR, rewrite, {"max_new_tokens": rewrite_tokens})
     out = None
     if isinstance(res, list) and res and "generated_text" in res[0]:
         out = res[0]["generated_text"].strip()
+        out = re.sub(r"<[^>]+>", "", out)
     return (out or s or "").strip()
 
 def extract_actions(text: str) -> dict:
-    t = text.strip()
+    t = clean_email_text(text or "").strip()
     if len(t) > 2000:
         t = t[:2000]
     prompt = (
@@ -107,7 +109,7 @@ def extract_actions(text: str) -> dict:
     return data
 
 def classify_email(text: str) -> dict:
-    t = (text or "").strip()
+    t = clean_email_text(text or "").strip()
     if len(t) > 1500:
         t = t[:1500]
     prompt = (
