@@ -9,7 +9,7 @@ from .models import Base, User, Email, Summary, Action
 from .schemas import SummarizeRequest, ActionCreate, ActionUpdate, ActionOut, EmailOut, SummaryOut
 from .auth import router as auth_router
 from .gmail import creds_from_session_token, gmail_service, extract_plain, gmail_link, parse_received
-from .hf import summarize, extract_actions
+from .hf import summarize, extract_actions, classify_email
 import json
 
 Base.metadata.create_all(bind=engine)
@@ -106,14 +106,21 @@ def do_summarize(req: SummarizeRequest, db: Session = Depends(get_db)) -> Summar
     existing = db.query(Summary).filter_by(email_id=email.id).first()
     if existing and existing.created_at and existing.created_at > datetime.utcnow() - timedelta(hours=24):
         return SummaryOut.from_orm(existing)
+    src = email.body_text or email.snippet or ""
     try:
-        s = summarize(email.body_text or email.snippet or "")
+        s = summarize(src)
     except Exception:
         s = ""
     try:
-        actions = extract_actions(email.body_text or email.snippet or "")
+        actions = extract_actions(src)
     except Exception:
         actions = {"tasks": [], "meetings": [], "deadlines": []}
+    try:
+        meta = classify_email(src)
+    except Exception:
+        meta = {"category": "fyi", "tags": []}
+    if isinstance(actions, dict):
+        actions["meta"] = meta
     data = json.dumps(actions)
     model = "distilbart-cnn-12-6 + flan-t5-small"
     if existing:
