@@ -117,17 +117,17 @@ def do_summarize(req: SummarizeRequest, db: Session = Depends(get_db)) -> Summar
         return SummaryOut.from_orm(existing)
     src = email.body_text or email.snippet or ""
     try:
-        s = summarize(src)
+        meta = classify_email(src)
+    except Exception:
+        meta = {"category": "fyi", "tags": []}
+    try:
+        s = summarize(src, meta.get("category"))
     except Exception:
         s = ""
     try:
         actions = extract_actions(src)
     except Exception:
         actions = {"tasks": [], "meetings": [], "deadlines": []}
-    try:
-        meta = classify_email(src)
-    except Exception:
-        meta = {"category": "fyi", "tags": []}
     if isinstance(actions, dict):
         actions["meta"] = meta
     data = json.dumps(actions)
@@ -159,17 +159,17 @@ def do_summarize_batch(body: MarkBatchRequest, db: Session = Depends(get_db)):
             continue
         src = email.body_text or email.snippet or ""
         try:
-            s = summarize(src)
+            meta = classify_email(src)
+        except Exception:
+            meta = {"category": "fyi", "tags": []}
+        try:
+            s = summarize(src, meta.get("category"))
         except Exception:
             s = ""
         try:
             actions = extract_actions(src)
         except Exception:
             actions = {"tasks": [], "meetings": [], "deadlines": []}
-        try:
-            meta = classify_email(src)
-        except Exception:
-            meta = {"category": "fyi", "tags": []}
         if isinstance(actions, dict):
             actions["meta"] = meta
         data = json.dumps(actions)
@@ -242,8 +242,21 @@ def import_actions(body: SummarizeRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404)
     summ = db.query(Summary).filter_by(email_id=email.id).first()
     if not summ:
-        s = summarize(email.body_text or email.snippet or "")
-        acts = extract_actions(email.body_text or email.snippet or "")
+        src = email.body_text or email.snippet or ""
+        try:
+            meta = classify_email(src)
+        except Exception:
+            meta = {"category": "fyi", "tags": []}
+        try:
+            s = summarize(src, meta.get("category"))
+        except Exception:
+            s = ""
+        try:
+            acts = extract_actions(src)
+        except Exception:
+            acts = {"tasks": [], "meetings": [], "deadlines": []}
+        if isinstance(acts, dict):
+            acts["meta"] = meta
         summ = Summary(email_id=email.id, summary_text=s, actions_json=json.dumps(acts), model_name="distilbart-cnn-12-6 + flan-t5-small", created_at=datetime.utcnow())
         db.add(summ)
         db.commit()

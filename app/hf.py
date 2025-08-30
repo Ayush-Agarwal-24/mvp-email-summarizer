@@ -32,23 +32,34 @@ def clean_email_text(t: str) -> str:
     x = re.sub(r"\s+", " ", x).strip()
     return x
 
-def summarize(text: str) -> str:
+def summarize(text: str, category: str | None = None) -> str:
     t = clean_email_text(text or "")
     if len(t) > 2000:
         t = t[:2000]
-    base = hf_post(SUMMARIZER, t, {"max_length": 150, "min_length": 40, "do_sample": False})
+    base = hf_post(SUMMARIZER, t, {"max_length": 240, "min_length": 70, "do_sample": False})
     s = ""
     if isinstance(base, list) and base and "summary_text" in base[0]:
         s = base[0]["summary_text"].strip()
-    prompt = (
-        "Rewrite the following email into a concise brief with sections.\n"
-        "Use short bullet points and clear headings.\n"
-        "Sections: Summary, Key Actions, Dates/Deadlines, Decision Needed.\n"
-        "Keep 5 bullets max in total.\n\n"
-        "Email:\n<<<\n" + (text or "")[:2000] + "\n>>>\n\n"
-        "Base summary:\n<<<\n" + s + "\n>>>\n"
-    )
-    res = hf_post(EXTRACTOR, prompt, {"max_new_tokens": 256})
+    cat = (category or "").strip().lower()
+    if cat in {"newsletter", "notification"}:
+        rewrite = (
+            "Rewrite into a clear newsletter brief in bullets with sections.\n"
+            "Use specific, non-redundant points; avoid greetings and subject repetition.\n"
+            "Sections: Highlights, Key Updates, What Changed, Links/Actions.\n"
+            "Keep 6-8 bullets total. Neutral, informative tone.\n\n"
+            "Email:\n<<<\n" + (text or "")[:2000] + "\n>>>\n\n"
+            "Base summary:\n<<<\n" + s + "\n>>>\n"
+        )
+    else:
+        rewrite = (
+            "Rewrite the following email into a concise brief with sections.\n"
+            "Use short bullet points and clear headings. Do not repeat the subject.\n"
+            "Sections: Summary, Key Actions, Dates/Deadlines, Decision Needed.\n"
+            "Keep 5 bullets max in total.\n\n"
+            "Email:\n<<<\n" + (text or "")[:2000] + "\n>>>\n\n"
+            "Base summary:\n<<<\n" + s + "\n>>>\n"
+        )
+    res = hf_post(EXTRACTOR, rewrite, {"max_new_tokens": 320})
     out = None
     if isinstance(res, list) and res and "generated_text" in res[0]:
         out = res[0]["generated_text"].strip()
