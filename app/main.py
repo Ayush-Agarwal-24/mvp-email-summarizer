@@ -146,6 +146,112 @@ def do_summarize(req: SummarizeRequest, db: Session = Depends(get_db)) -> Summar
     db.refresh(rec)
     return SummaryOut.from_orm(rec)
 
+@app.post("/api/summary")
+def summary_only(req: SummarizeRequest, db: Session = Depends(get_db)) -> SummaryOut:
+    email = db.query(Email).filter_by(id=req.email_id).first()
+    if not email:
+        raise HTTPException(status_code=404)
+    existing = db.query(Summary).filter_by(email_id=email.id).first()
+    if existing and not req.force and (existing.summary_text or "").strip() and existing.created_at and existing.created_at > datetime.utcnow() - timedelta(hours=24):
+        return SummaryOut.from_orm(existing)
+    src = email.body_text or email.snippet or ""
+    try:
+        s = summarize(src)
+    except Exception:
+        s = ""
+    if existing:
+        existing.summary_text = s
+        existing.model_name = "bart-large-cnn"
+        existing.created_at = datetime.utcnow()
+        db.commit()
+        db.refresh(existing)
+        return SummaryOut.from_orm(existing)
+    rec = Summary(email_id=email.id, summary_text=s, actions_json=None, model_name="bart-large-cnn", created_at=datetime.utcnow())
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    return SummaryOut.from_orm(rec)
+
+@app.post("/api/summary/batch")
+def summary_only_batch(body: MarkBatchRequest, db: Session = Depends(get_db)):
+    ids = body.ids or []
+    done = 0
+    for eid in ids:
+        email = db.query(Email).filter_by(id=eid).first()
+        if not email:
+            continue
+        existing = db.query(Summary).filter_by(email_id=email.id).first()
+        if existing and not body.force and (existing.summary_text or "").strip() and existing.created_at and existing.created_at > datetime.utcnow() - timedelta(hours=24):
+            continue
+        src = email.body_text or email.snippet or ""
+        try:
+            s = summarize(src)
+        except Exception:
+            s = ""
+        if existing:
+            existing.summary_text = s
+            existing.model_name = "bart-large-cnn"
+            existing.created_at = datetime.utcnow()
+        else:
+            db.add(Summary(email_id=email.id, summary_text=s, actions_json=None, model_name="bart-large-cnn", created_at=datetime.utcnow()))
+        db.commit()
+        done += 1
+    return {"processed": done}
+
+@app.post("/api/actions/extract")
+def actions_extract(req: SummarizeRequest, db: Session = Depends(get_db)) -> SummaryOut:
+    email = db.query(Email).filter_by(id=req.email_id).first()
+    if not email:
+        raise HTTPException(status_code=404)
+    existing = db.query(Summary).filter_by(email_id=email.id).first()
+    if existing and not req.force and (existing.actions_json or "").strip() and existing.created_at and existing.created_at > datetime.utcnow() - timedelta(hours=24):
+        return SummaryOut.from_orm(existing)
+    src = email.body_text or email.snippet or ""
+    try:
+        acts = extract_actions(src)
+    except Exception:
+        acts = {"tasks": [], "meetings": [], "deadlines": []}
+    data = json.dumps(acts)
+    if existing:
+        existing.actions_json = data
+        existing.model_name = "bart-large-cnn + flan-t5-base"
+        existing.created_at = datetime.utcnow()
+        db.commit()
+        db.refresh(existing)
+        return SummaryOut.from_orm(existing)
+    rec = Summary(email_id=email.id, summary_text=None, actions_json=data, model_name="bart-large-cnn + flan-t5-base", created_at=datetime.utcnow())
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    return SummaryOut.from_orm(rec)
+
+@app.post("/api/actions/batch")
+def actions_extract_batch(body: MarkBatchRequest, db: Session = Depends(get_db)):
+    ids = body.ids or []
+    done = 0
+    for eid in ids:
+        email = db.query(Email).filter_by(id=eid).first()
+        if not email:
+            continue
+        existing = db.query(Summary).filter_by(email_id=email.id).first()
+        if existing and not body.force and (existing.actions_json or "").strip() and existing.created_at and existing.created_at > datetime.utcnow() - timedelta(hours=24):
+            continue
+        src = email.body_text or email.snippet or ""
+        try:
+            acts = extract_actions(src)
+        except Exception:
+            acts = {"tasks": [], "meetings": [], "deadlines": []}
+        data = json.dumps(acts)
+        if existing:
+            existing.actions_json = data
+            existing.model_name = "bart-large-cnn + flan-t5-base"
+            existing.created_at = datetime.utcnow()
+        else:
+            db.add(Summary(email_id=email.id, summary_text=None, actions_json=data, model_name="bart-large-cnn + flan-t5-base", created_at=datetime.utcnow()))
+        db.commit()
+        done += 1
+    return {"processed": done}
+
 @app.post("/api/summarize/batch")
 def do_summarize_batch(body: MarkBatchRequest, db: Session = Depends(get_db)):
     ids = body.ids or []
