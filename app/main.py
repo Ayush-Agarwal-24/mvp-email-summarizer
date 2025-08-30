@@ -162,3 +162,57 @@ def update_action(item_id: int, body: ActionUpdate, db: Session = Depends(get_db
     db.commit()
     db.refresh(rec)
     return ActionOut.from_orm(rec).dict()
+
+@app.post("/api/actions/import")
+def import_actions(body: SummarizeRequest, db: Session = Depends(get_db)):
+    email = db.query(Email).filter_by(id=body.email_id).first()
+    if not email:
+        raise HTTPException(status_code=404)
+    summ = db.query(Summary).filter_by(email_id=email.id).first()
+    if not summ:
+        s = summarize(email.body_text or email.snippet or "")
+        acts = extract_actions(email.body_text or email.snippet or "")
+        summ = Summary(email_id=email.id, summary_text=s, actions_json=json.dumps(acts), model_name="distilbart-cnn-12-6 + flan-t5-small", created_at=datetime.utcnow())
+        db.add(summ)
+        db.commit()
+        db.refresh(summ)
+    try:
+        data = json.loads(summ.actions_json or "{}")
+    except Exception:
+        data = {"tasks": [], "meetings": [], "deadlines": []}
+    created = []
+    for t in data.get("tasks", []) or []:
+        title = t.get("title")
+        if not title:
+            continue
+        exists = db.query(Action).filter_by(email_id=email.id, type="task", title=title).first()
+        if exists:
+            continue
+        rec = Action(email_id=email.id, type="task", title=title, status="open")
+        db.add(rec)
+        db.flush()
+        created.append(rec)
+    for m in data.get("meetings", []) or []:
+        title = m.get("title")
+        if not title:
+            continue
+        exists = db.query(Action).filter_by(email_id=email.id, type="meeting", title=title).first()
+        if exists:
+            continue
+        rec = Action(email_id=email.id, type="meeting", title=title, status="open")
+        db.add(rec)
+        db.flush()
+        created.append(rec)
+    for d in data.get("deadlines", []) or []:
+        title = d.get("title")
+        if not title:
+            continue
+        exists = db.query(Action).filter_by(email_id=email.id, type="deadline", title=title).first()
+        if exists:
+            continue
+        rec = Action(email_id=email.id, type="deadline", title=title, status="open")
+        db.add(rec)
+        db.flush()
+        created.append(rec)
+    db.commit()
+    return {"created": len(created)}
