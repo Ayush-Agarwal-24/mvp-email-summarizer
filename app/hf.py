@@ -4,7 +4,7 @@ import re
 import httpx
 from .config import HF_API_TOKEN
 
-SUMMARIZER = "sshleifer/distilbart-cnn-12-6"
+SUMMARIZER = "facebook/bart-large-cnn"
 EXTRACTOR = "google/flan-t5-small"
 
 def hf_post(model: str, inputs: str, parameters: dict | None = None) -> dict:
@@ -32,54 +32,24 @@ def clean_email_text(t: str) -> str:
     x = re.sub(r"\s+", " ", x).strip()
     return x
 
-def summarize(text: str, category: str | None = None, longer: bool = False) -> str:
+def summarize(text: str) -> str:
     t = clean_email_text(text or "")
-    n = len(t)
-    if n > 4000:
-        t = t[:4000]
-        n = len(t)
-    if longer:
-        base_params = {"max_length": 340, "min_length": 120, "do_sample": False}
-        bullet_hint = "Aim for 8-10 bullets."
-        rewrite_tokens = 420
-    else:
-        if n <= 400:
-            base_params = {"max_length": 90, "min_length": 25, "do_sample": False}
-            bullet_hint = "Keep 3-4 bullets total."
-            rewrite_tokens = 220
-        elif n <= 1200:
-            base_params = {"max_length": 200, "min_length": 60, "do_sample": False}
-            bullet_hint = "Keep 5-6 bullets total."
-            rewrite_tokens = 300
-        else:
-            base_params = {"max_length": 260, "min_length": 80, "do_sample": False}
-            bullet_hint = "Keep 6-8 bullets total."
-            rewrite_tokens = 360
-    base = hf_post(SUMMARIZER, t, base_params)
+    if len(t) > 3000:
+        t = t[:3000]
+    base = hf_post(SUMMARIZER, t, {"max_length": 1020, "min_length": 200, "do_sample": False})
     s = ""
     if isinstance(base, list) and base and "summary_text" in base[0]:
         s = base[0]["summary_text"].strip()
         s = re.sub(r"<[^>]+>", "", s)
-    cat = (category or "").strip().lower()
-    if cat in {"newsletter", "notification"}:
-        rewrite = (
-            "Rewrite into a clear newsletter brief in bullets with sections.\n"
-            "Use specific, non-redundant points; avoid greetings and subject repetition.\n"
-            + bullet_hint + " Neutral, informative tone.\n"
-            "Sections: Highlights, Key Updates, What Changed, Links/Actions.\n\n"
-            "Email:\n<<<\n" + t[:2000] + "\n>>>\n\n"
-            "Base summary:\n<<<\n" + s + "\n>>>\n"
-        )
-    else:
-        rewrite = (
-            "Rewrite the following email into a concise brief with sections.\n"
-            "Use bullet points and clear headings. Do not repeat the subject.\n"
-            "Sections: Summary, Key Actions, Dates/Deadlines, Decision Needed.\n"
-            + bullet_hint + "\n\n"
-            "Email:\n<<<\n" + t[:2000] + "\n>>>\n\n"
-            "Base summary:\n<<<\n" + s + "\n>>>\n"
-        )
-    res = hf_post(EXTRACTOR, rewrite, {"max_new_tokens": rewrite_tokens})
+    rewrite = (
+        "Rewrite the following email into a proper detailed brief with sections.\n"
+        "Use bullet points and clear headings. Do not repeat the subject.\n"
+        "Sections: Summary, Key Actions, Dates/Deadlines, Decision Needed.\n"
+        "Keep 5-7 bullets total.\n\n"
+        "Email:\n<<<\n" + t[:10000] + "\n>>>\n\n"
+        "Base summary:\n<<<\n" + s + "\n>>>\n"
+    )
+    res = hf_post(EXTRACTOR, rewrite, {"max_new_tokens": 840})
     out = None
     if isinstance(res, list) and res and "generated_text" in res[0]:
         out = res[0]["generated_text"].strip()

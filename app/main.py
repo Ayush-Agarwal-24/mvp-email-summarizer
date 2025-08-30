@@ -131,7 +131,7 @@ def do_summarize(req: SummarizeRequest, db: Session = Depends(get_db)) -> Summar
     if isinstance(actions, dict):
         actions["meta"] = meta
     data = json.dumps(actions)
-    model = "distilbart-cnn-12-6 + flan-t5-small"
+    model = "bart-large-cnn + flan-t5-small"
     if existing:
         existing.summary_text = s
         existing.actions_json = data
@@ -173,7 +173,7 @@ def do_summarize_batch(body: MarkBatchRequest, db: Session = Depends(get_db)):
         if isinstance(actions, dict):
             actions["meta"] = meta
         data = json.dumps(actions)
-        model = "distilbart-cnn-12-6 + flan-t5-small"
+        model = "bart-large-cnn + flan-t5-small"
         if existing:
             existing.summary_text = s
             existing.actions_json = data
@@ -257,7 +257,7 @@ def import_actions(body: SummarizeRequest, db: Session = Depends(get_db)):
             acts = {"tasks": [], "meetings": [], "deadlines": []}
         if isinstance(acts, dict):
             acts["meta"] = meta
-        summ = Summary(email_id=email.id, summary_text=s, actions_json=json.dumps(acts), model_name="distilbart-cnn-12-6 + flan-t5-small", created_at=datetime.utcnow())
+        summ = Summary(email_id=email.id, summary_text=s, actions_json=json.dumps(acts), model_name="bart-large-cnn + flan-t5-small", created_at=datetime.utcnow())
         db.add(summ)
         db.commit()
         db.refresh(summ)
