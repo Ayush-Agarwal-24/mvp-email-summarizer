@@ -2,13 +2,13 @@ import secrets
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 from urllib.parse import urlencode
-from .config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, OAUTH_REDIRECT_URI
+from .config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, OAUTH_REDIRECT_URI, GMAIL_SCOPE
 
 router = APIRouter()
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
-SCOPE = "https://www.googleapis.com/auth/gmail.readonly openid email profile"
+SCOPE = f"{GMAIL_SCOPE} openid email profile"
 
 @router.get("/auth/google/login")
 def google_login(request: Request):

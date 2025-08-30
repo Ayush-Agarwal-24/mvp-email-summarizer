@@ -4,8 +4,9 @@ from typing import Optional
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from bs4 import BeautifulSoup
+from .config import GMAIL_SCOPE as _GMAIL_SCOPE
 
-GMAIL_SCOPE = ["https://www.googleapis.com/auth/gmail.readonly"]
+GMAIL_SCOPE = [_GMAIL_SCOPE]
 
 def creds_from_session_token(token: dict) -> Credentials:
     return Credentials(

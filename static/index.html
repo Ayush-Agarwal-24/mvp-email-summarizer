@@ -15,9 +15,27 @@
       <span id="user"></span>
       <a id="connect" class="btn" href="/auth/google/login">Connect Gmail</a>
       <button id="refresh" class="btn">Refresh</button>
+      <button id="markAll" class="btn">Mark All Read</button>
     </div>
   </header>
   <main>
+    <div class="gmail-filters">
+      <div class="row">
+        <span>Gmail:</span>
+        <button class="tab gtab active" data-gfilter="unread">Unread</button>
+        <button class="tab gtab" data-gfilter="starred">Starred</button>
+        <button class="tab gtab" data-gfilter="all">All</button>
+      </div>
+      <div class="row">
+        <span>Category:</span>
+        <button class="tab ctab active" data-gcat="">All</button>
+        <button class="tab ctab" data-gcat="primary">Primary</button>
+        <button class="tab ctab" data-gcat="social">Social</button>
+        <button class="tab ctab" data-gcat="promotions">Promotions</button>
+        <button class="tab ctab" data-gcat="updates">Updates</button>
+        <button class="tab ctab" data-gcat="forums">Forums</button>
+      </div>
+    </div>
     <div class="filters">
       <button data-filter="all" class="tab active">All</button>
       <button data-filter="tasks" class="tab">Tasks</button>
@@ -32,6 +50,7 @@
       <div id="modal-content"></div>
       <div class="modal-actions">
         <button id="modal-import" class="btn">Import Actions</button>
+        <button id="modal-copy" class="btn">Copy Summary</button>
         <button id="modal-close" class="btn">Close</button>
       </div>
     </div>

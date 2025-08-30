@@ -10,3 +10,4 @@ OAUTH_REDIRECT_URI = os.getenv("OAUTH_REDIRECT_URI", "http://localhost:8000/auth
 HF_API_TOKEN = os.getenv("HF_API_TOKEN", "")
 DB_URL = os.getenv("DB_URL", "sqlite:///./data.db")
 ENV = os.getenv("ENV", "local")
+GMAIL_SCOPE = os.getenv("GMAIL_SCOPE", "https://www.googleapis.com/auth/gmail.readonly")

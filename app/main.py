@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from .session import add_session
 from .db import SessionLocal, engine
 from .models import Base, User, Email, Summary, Action
-from .schemas import SummarizeRequest, ActionCreate, ActionUpdate, ActionOut, EmailOut, SummaryOut
+from .schemas import SummarizeRequest, ActionCreate, ActionUpdate, ActionOut, EmailOut, SummaryOut, MarkBatchRequest
 from .auth import router as auth_router
 from .gmail import creds_from_session_token, gmail_service, extract_plain, gmail_link, parse_received
 from .hf import summarize, extract_actions, classify_email
@@ -45,7 +45,7 @@ def me(request: Request):
         return {"connected": False}
 
 @app.get("/api/emails")
-def list_emails(request: Request, filter: str = "unread", limit: int = 50, db: Session = Depends(get_db)):
+def list_emails(request: Request, filter: str = "unread", category: str | None = None, limit: int = 50, db: Session = Depends(get_db)):
     token = request.session.get("token")
     if not token:
         return []
@@ -57,6 +57,15 @@ def list_emails(request: Request, filter: str = "unread", limit: int = 50, db: S
             label_ids.append("UNREAD")
         if filter == "starred":
             label_ids.append("STARRED")
+        cat_map = {
+            "primary": "CATEGORY_PERSONAL",
+            "social": "CATEGORY_SOCIAL",
+            "promotions": "CATEGORY_PROMOTIONS",
+            "updates": "CATEGORY_UPDATES",
+            "forums": "CATEGORY_FORUMS",
+        }
+        if category and category.lower() in cat_map:
+            label_ids.append(cat_map[category.lower()])
         msgs = svc.users().messages().list(userId="me", labelIds=label_ids, maxResults=limit).execute().get("messages", [])
         out = []
         profile = svc.users().getProfile(userId="me").execute()
@@ -223,3 +232,42 @@ def import_actions(body: SummarizeRequest, db: Session = Depends(get_db)):
         created.append(rec)
     db.commit()
     return {"created": len(created)}
+
+@app.post("/api/gmail/mark_read")
+def gmail_mark_read(body: SummarizeRequest, request: Request, db: Session = Depends(get_db)):
+    token = request.session.get("token")
+    if not token:
+        raise HTTPException(status_code=401)
+    email = db.query(Email).filter_by(id=body.email_id).first()
+    if not email:
+        raise HTTPException(status_code=404)
+    try:
+        creds = creds_from_session_token(token)
+        svc = gmail_service(creds)
+        svc.users().messages().modify(userId="me", id=email.message_id, body={"removeLabelIds": ["UNREAD"]}).execute()
+        return {"ok": True}
+    except Exception:
+        raise HTTPException(status_code=403)
+
+@app.post("/api/gmail/mark_read_batch")
+def gmail_mark_read_batch(body: MarkBatchRequest, request: Request, db: Session = Depends(get_db)):
+    token = request.session.get("token")
+    if not token:
+        raise HTTPException(status_code=401)
+    ids = body.ids or []
+    try:
+        creds = creds_from_session_token(token)
+        svc = gmail_service(creds)
+        n = 0
+        for eid in ids:
+            email = db.query(Email).filter_by(id=eid).first()
+            if not email:
+                continue
+            try:
+                svc.users().messages().modify(userId="me", id=email.message_id, body={"removeLabelIds": ["UNREAD"]}).execute()
+                n += 1
+            except Exception:
+                pass
+        return {"updated": n}
+    except Exception:
+        raise HTTPException(status_code=403)

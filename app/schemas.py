@@ -43,3 +43,6 @@ class SummaryOut(BaseModel):
     model_name: Optional[str]
     class Config:
         from_attributes = True
+
+class MarkBatchRequest(BaseModel):
+    ids: List[int]
