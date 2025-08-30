@@ -113,7 +113,7 @@ def do_summarize(req: SummarizeRequest, db: Session = Depends(get_db)) -> Summar
     if not email:
         raise HTTPException(status_code=404)
     existing = db.query(Summary).filter_by(email_id=email.id).first()
-    if existing and existing.created_at and existing.created_at > datetime.utcnow() - timedelta(hours=24):
+    if existing and (existing.summary_text or "").strip() and existing.created_at and existing.created_at > datetime.utcnow() - timedelta(hours=24):
         return SummaryOut.from_orm(existing)
     src = email.body_text or email.snippet or ""
     try:
@@ -155,7 +155,7 @@ def do_summarize_batch(body: MarkBatchRequest, db: Session = Depends(get_db)):
         if not email:
             continue
         existing = db.query(Summary).filter_by(email_id=email.id).first()
-        if existing and existing.created_at and existing.created_at > datetime.utcnow() - timedelta(hours=24):
+        if existing and (existing.summary_text or "").strip() and existing.created_at and existing.created_at > datetime.utcnow() - timedelta(hours=24):
             continue
         src = email.body_text or email.snippet or ""
         try:
