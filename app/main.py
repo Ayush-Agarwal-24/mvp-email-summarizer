@@ -121,7 +121,7 @@ def do_summarize(req: SummarizeRequest, db: Session = Depends(get_db)) -> Summar
     except Exception:
         meta = {"category": "fyi", "tags": []}
     try:
-        s = summarize(src, meta.get("category"))
+        s = summarize(src)
     except Exception:
         s = ""
     try:
@@ -163,7 +163,7 @@ def do_summarize_batch(body: MarkBatchRequest, db: Session = Depends(get_db)):
         except Exception:
             meta = {"category": "fyi", "tags": []}
         try:
-            s = summarize(src, meta.get("category"))
+            s = summarize(src)
         except Exception:
             s = ""
         try:
@@ -248,7 +248,7 @@ def import_actions(body: SummarizeRequest, db: Session = Depends(get_db)):
         except Exception:
             meta = {"category": "fyi", "tags": []}
         try:
-            s = summarize(src, meta.get("category"))
+            s = summarize(src)
         except Exception:
             s = ""
         try:
