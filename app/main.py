@@ -9,7 +9,7 @@ from .models import Base, User, Email, Summary, Action
 from .schemas import SummarizeRequest, ActionCreate, ActionUpdate, ActionOut, EmailOut, SummaryOut, MarkBatchRequest
 from .auth import router as auth_router
 from .gmail import creds_from_session_token, gmail_service, extract_plain, gmail_link, parse_received
-from .hf import summarize, extract_actions, classify_email
+from .hf import summarize, extract_actions, classify_email, clean_email_text
 import json
 
 Base.metadata.create_all(bind=engine)
@@ -145,6 +145,62 @@ def do_summarize(req: SummarizeRequest, db: Session = Depends(get_db)) -> Summar
     db.commit()
     db.refresh(rec)
     return SummaryOut.from_orm(rec)
+
+@app.post("/api/summarize/batch")
+def do_summarize_batch(body: MarkBatchRequest, db: Session = Depends(get_db)):
+    ids = body.ids or []
+    done = 0
+    for eid in ids:
+        email = db.query(Email).filter_by(id=eid).first()
+        if not email:
+            continue
+        existing = db.query(Summary).filter_by(email_id=email.id).first()
+        if existing and existing.created_at and existing.created_at > datetime.utcnow() - timedelta(hours=24):
+            continue
+        src = email.body_text or email.snippet or ""
+        try:
+            s = summarize(src)
+        except Exception:
+            s = ""
+        try:
+            actions = extract_actions(src)
+        except Exception:
+            actions = {"tasks": [], "meetings": [], "deadlines": []}
+        try:
+            meta = classify_email(src)
+        except Exception:
+            meta = {"category": "fyi", "tags": []}
+        if isinstance(actions, dict):
+            actions["meta"] = meta
+        data = json.dumps(actions)
+        model = "distilbart-cnn-12-6 + flan-t5-small"
+        if existing:
+            existing.summary_text = s
+            existing.actions_json = data
+            existing.model_name = model
+            existing.created_at = datetime.utcnow()
+        else:
+            db.add(Summary(email_id=email.id, summary_text=s, actions_json=data, model_name=model, created_at=datetime.utcnow()))
+        db.commit()
+        done += 1
+    return {"processed": done}
+
+@app.get("/api/email/{email_id}")
+def email_detail(email_id: int, db: Session = Depends(get_db)):
+    email = db.query(Email).filter_by(id=email_id).first()
+    if not email:
+        raise HTTPException(status_code=404)
+    raw = email.body_text or email.snippet or ""
+    clean = clean_email_text(raw)
+    return {
+        "id": email.id,
+        "sender": email.sender,
+        "subject": email.subject,
+        "received_at": email.received_at,
+        "gmail_url": email.gmail_url,
+        "body_text": raw[:5000],
+        "clean_body": clean[:5000],
+    }
 
 @app.get("/api/items")
 def list_actions(type: str | None = None, status: str | None = None, db: Session = Depends(get_db)):

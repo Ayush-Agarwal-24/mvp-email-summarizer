@@ -16,9 +16,18 @@
       <a id="connect" class="btn" href="/auth/google/login">Connect Gmail</a>
       <button id="refresh" class="btn">Refresh</button>
       <button id="markAll" class="btn">Mark All Read</button>
+      <button id="sumAll" class="btn">Summarize All</button>
     </div>
   </header>
   <main>
+    <div class="toolbar">
+      <input id="search" class="input" placeholder="Search subject, sender" />
+      <select id="domain" class="input"></select>
+      <select id="sort" class="input">
+        <option value="priority">Sort: Priority</option>
+        <option value="time">Sort: Time</option>
+      </select>
+    </div>
     <div class="gmail-filters">
       <div class="row">
         <span>Gmail:</span>
@@ -47,7 +56,7 @@
   </main>
   <div id="modal" class="modal hidden">
     <div class="modal-body">
-      <div id="modal-content"></div>
+      <div id="modal-content" class="modal-grid"></div>
       <div class="modal-actions">
         <button id="modal-import" class="btn">Import Actions</button>
         <button id="modal-copy" class="btn">Copy Summary</button>
