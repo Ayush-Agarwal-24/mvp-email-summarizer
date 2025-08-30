@@ -30,56 +30,73 @@ def get_db():
 def dashboard():
     return FileResponse("static/index.html")
 
+@app.get("/api/me")
+def me(request: Request):
+    token = request.session.get("token")
+    if not token:
+        return {"connected": False}
+    try:
+        creds = creds_from_session_token(token)
+        svc = gmail_service(creds)
+        profile = svc.users().getProfile(userId="me").execute()
+        email = profile.get("emailAddress")
+        return {"connected": True, "email": email}
+    except Exception:
+        return {"connected": False}
+
 @app.get("/api/emails")
 def list_emails(request: Request, filter: str = "unread", limit: int = 50, db: Session = Depends(get_db)):
     token = request.session.get("token")
     if not token:
         return []
-    creds = creds_from_session_token(token)
-    svc = gmail_service(creds)
-    label_ids = ["INBOX"]
-    if filter == "unread":
-        label_ids.append("UNREAD")
-    if filter == "starred":
-        label_ids.append("STARRED")
-    msgs = svc.users().messages().list(userId="me", labelIds=label_ids, maxResults=limit).execute().get("messages", [])
-    out = []
-    profile = svc.users().getProfile(userId="me").execute()
-    sub = profile.get("emailAddress")
-    user = db.query(User).filter_by(google_sub=sub).first()
-    if not user:
-        user = User(google_sub=sub, email=sub)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    for m in msgs:
-        mid = m.get("id")
-        full = svc.users().messages().get(userId="me", id=mid, format="full").execute()
-        payload = full.get("payload")
-        headers = payload.get("headers", []) if payload else []
-        def h(name):
-            for x in headers:
-                if x.get("name") == name:
-                    return x.get("value")
-            return None
-        sender = h("From")
-        subject = h("Subject")
-        body = extract_plain(payload) or ""
-        snippet = full.get("snippet") or body[:160]
-        internal = full.get("internalDate")
-        received = parse_received(internal)
-        thread_id = full.get("threadId") or ""
-        gmail_url = gmail_link(mid)
-        existing = db.query(Email).filter_by(message_id=mid).first()
-        if not existing:
-            rec = Email(user_id=user.id, message_id=mid, thread_id=thread_id, sender=sender, subject=subject, snippet=snippet, body_text=body, received_at=received, gmail_url=gmail_url)
-            db.add(rec)
+    try:
+        creds = creds_from_session_token(token)
+        svc = gmail_service(creds)
+        label_ids = ["INBOX"]
+        if filter == "unread":
+            label_ids.append("UNREAD")
+        if filter == "starred":
+            label_ids.append("STARRED")
+        msgs = svc.users().messages().list(userId="me", labelIds=label_ids, maxResults=limit).execute().get("messages", [])
+        out = []
+        profile = svc.users().getProfile(userId="me").execute()
+        sub = profile.get("emailAddress")
+        user = db.query(User).filter_by(google_sub=sub).first()
+        if not user:
+            user = User(google_sub=sub, email=sub)
+            db.add(user)
             db.commit()
-            db.refresh(rec)
-            out.append(rec)
-        else:
-            out.append(existing)
-    return [EmailOut.from_orm(r).dict() for r in out]
+            db.refresh(user)
+        for m in msgs:
+            mid = m.get("id")
+            full = svc.users().messages().get(userId="me", id=mid, format="full").execute()
+            payload = full.get("payload")
+            headers = payload.get("headers", []) if payload else []
+            def h(name):
+                for x in headers:
+                    if x.get("name") == name:
+                        return x.get("value")
+                return None
+            sender = h("From")
+            subject = h("Subject")
+            body = extract_plain(payload) or ""
+            snippet = full.get("snippet") or body[:160]
+            internal = full.get("internalDate")
+            received = parse_received(internal)
+            thread_id = full.get("threadId") or ""
+            gmail_url = gmail_link(mid)
+            existing = db.query(Email).filter_by(message_id=mid).first()
+            if not existing:
+                rec = Email(user_id=user.id, message_id=mid, thread_id=thread_id, sender=sender, subject=subject, snippet=snippet, body_text=body, received_at=received, gmail_url=gmail_url)
+                db.add(rec)
+                db.commit()
+                db.refresh(rec)
+                out.append(rec)
+            else:
+                out.append(existing)
+        return [EmailOut.from_orm(r).dict() for r in out]
+    except Exception:
+        return []
 
 @app.post("/api/summarize")
 def do_summarize(req: SummarizeRequest, db: Session = Depends(get_db)) -> SummaryOut:
@@ -89,8 +106,14 @@ def do_summarize(req: SummarizeRequest, db: Session = Depends(get_db)) -> Summar
     existing = db.query(Summary).filter_by(email_id=email.id).first()
     if existing and existing.created_at and existing.created_at > datetime.utcnow() - timedelta(hours=24):
         return SummaryOut.from_orm(existing)
-    s = summarize(email.body_text or email.snippet or "")
-    actions = extract_actions(email.body_text or email.snippet or "")
+    try:
+        s = summarize(email.body_text or email.snippet or "")
+    except Exception:
+        s = ""
+    try:
+        actions = extract_actions(email.body_text or email.snippet or "")
+    except Exception:
+        actions = {"tasks": [], "meetings": [], "deadlines": []}
     data = json.dumps(actions)
     model = "distilbart-cnn-12-6 + flan-t5-small"
     if existing:

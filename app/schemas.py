@@ -24,7 +24,7 @@ class ActionOut(BaseModel):
     status: str
     snooze_until: Optional[datetime]
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class EmailOut(BaseModel):
     id: int
@@ -34,7 +34,7 @@ class EmailOut(BaseModel):
     received_at: Optional[datetime]
     gmail_url: Optional[str]
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class SummaryOut(BaseModel):
     email_id: int
@@ -42,4 +42,4 @@ class SummaryOut(BaseModel):
     actions_json: Optional[str]
     model_name: Optional[str]
     class Config:
-        orm_mode = True
+        from_attributes = True
