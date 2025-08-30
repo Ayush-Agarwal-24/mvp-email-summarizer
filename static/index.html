@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Email Summarizer</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <div class="left">
+      <h1>Email Summarizer</h1>
+    </div>
+    <div class="right">
+      <a class="btn" href="/auth/google/login">Connect Gmail</a>
+      <button id="refresh" class="btn">Refresh</button>
+    </div>
+  </header>
+  <main>
+    <div class="filters">
+      <button data-filter="all" class="tab active">All</button>
+      <button data-filter="tasks" class="tab">Tasks</button>
+      <button data-filter="meetings" class="tab">Meetings</button>
+      <button data-filter="deadlines" class="tab">Deadlines</button>
+    </div>
+    <div id="list" class="list"></div>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
