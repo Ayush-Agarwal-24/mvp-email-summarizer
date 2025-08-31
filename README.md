@@ -38,7 +38,7 @@ Open `http://127.0.0.1:8000` and connect Gmail.
 
 ## API
 - GET `/api/me`
-- GET `/api/emails?filter=unread|starred&limit=50`
+- GET `/api/emails?filter=unread|starred&limit=10`
 - POST `/api/summarize` `{ "email_id": number }`
 - GET `/api/items`
 - POST `/api/items`

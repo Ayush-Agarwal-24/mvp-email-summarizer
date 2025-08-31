@@ -5,11 +5,11 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from .session import add_session
 from .db import SessionLocal, engine
-from .models import Base, User, Email, Summary
+from .models import Base, User, Email, Summary, Action
 from .schemas import SummarizeRequest, EmailOut, SummaryOut, GenTestRequest
 from .auth import router as auth_router
 from .gmail import creds_from_session_token, gmail_service, extract_plain, gmail_link, parse_received
-from .hf import clean_email_text, generate_with_prompt
+from .hf import generate_with_prompt, extract_actions_llm
 import json
 import traceback
 
@@ -46,7 +46,7 @@ def me(request: Request):
         return {"connected": False}
 
 @app.get("/api/emails")
-def list_emails(request: Request, filter: str = "unread", category: str | None = None, limit: int = 50, db: Session = Depends(get_db)):
+def list_emails(request: Request, filter: str = "unread", category: str | None = None, limit: int = 10, db: Session = Depends(get_db)):
     token = request.session.get("token")
     if not token:
         return []
@@ -117,12 +117,10 @@ def do_summarize(req: SummarizeRequest, db: Session = Depends(get_db)) -> Summar
     src = email.body_text or email.snippet or ""
     try:
         s, model = generate_with_prompt(email.sender or "", email.subject or "", src, req.prompt)
-
-        # print(f"Email Sender {email.sender}, Subject {email.subject}, Body {src} -> Model {model} Prompt {req.prompt}")
     except Exception:
         traceback.print_exc()
         s, model = "", ""
-    model = model or "mistralai/Mistral-7B-Instruct-v0.3"
+    model = model or PRIMARY_MODEL
     if existing:
         existing.summary_text = s
         existing.actions_json = None
@@ -137,6 +135,101 @@ def do_summarize(req: SummarizeRequest, db: Session = Depends(get_db)) -> Summar
     db.refresh(rec)
     return SummaryOut.from_orm(rec)
 
+@app.post("/api/summarize_all")
+def summarize_all(request: Request, db: Session = Depends(get_db)):
+    token = request.session.get("token")
+    if not token:
+        raise HTTPException(status_code=401)
+    user = None
+    try:
+        creds = creds_from_session_token(token)
+        svc = gmail_service(creds)
+        profile = svc.users().getProfile(userId="me").execute()
+        sub = profile.get("emailAddress")
+        user = db.query(User).filter_by(google_sub=sub).first()
+        if not user:
+            raise HTTPException(status_code=401)
+        emails = db.query(Email).filter_by(user_id=user.id).order_by(Email.received_at.desc()).limit(10).all()
+        results = []
+        for email in emails:
+            src = email.body_text or email.snippet or ""
+            s, model = generate_with_prompt(email.sender or "", email.subject or "", src, None)
+            existing = db.query(Summary).filter_by(email_id=email.id).first()
+            if existing:
+                existing.summary_text = s
+                existing.actions_json = None
+                existing.model_name = model
+                existing.created_at = datetime.utcnow()
+                db.commit()
+                db.refresh(existing)
+                results.append(SummaryOut.from_orm(existing).dict())
+            else:
+                rec = Summary(email_id=email.id, summary_text=s, actions_json=None, model_name=model, created_at=datetime.utcnow())
+                db.add(rec)
+                db.commit()
+                db.refresh(rec)
+                results.append(SummaryOut.from_orm(rec).dict())
+        return results
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/extract_actions")
+def extract_actions_api(req: SummarizeRequest, db: Session = Depends(get_db)):
+    email = db.query(Email).filter_by(id=req.email_id).first()
+    if not email:
+        raise HTTPException(status_code=404)
+    src = email.body_text or email.snippet or ""
+    try:
+        actions = extract_actions_llm(email.sender or "", email.subject or "", src, req.prompt)
+    except Exception:
+        traceback.print_exc()
+        actions = {"tasks": [], "meetings": [], "deadlines": []}
+    db.query(Action).filter_by(email_id=email.id).delete()
+    for t in actions.get("tasks", []):
+        db.add(Action(email_id=email.id, type="task", title=t.get("title", ""), when_datetime=None, status="open", snooze_until=None))
+    for m in actions.get("meetings", []):
+        db.add(Action(email_id=email.id, type="meeting", title=m.get("title", ""), when_datetime=None, status="open", snooze_until=None))
+    for d in actions.get("deadlines", []):
+        db.add(Action(email_id=email.id, type="deadline", title=d.get("title", ""), when_datetime=None, status="open", snooze_until=None))
+    db.commit()
+    return actions
+
+@app.post("/api/extract_all")
+def extract_all_actions(request: Request, db: Session = Depends(get_db)):
+    token = request.session.get("token")
+    if not token:
+        raise HTTPException(status_code=401)
+    user = None
+    try:
+        creds = creds_from_session_token(token)
+        svc = gmail_service(creds)
+        profile = svc.users().getProfile(userId="me").execute()
+        sub = profile.get("emailAddress")
+        user = db.query(User).filter_by(google_sub=sub).first()
+        if not user:
+            raise HTTPException(status_code=401)
+        emails = db.query(Email).filter_by(user_id=user.id).order_by(Email.received_at.desc()).limit(10).all()
+        results = []
+        for email in emails:
+            src = email.body_text or email.snippet or ""
+            try:
+                actions = extract_actions_llm(email.sender or "", email.subject or "", src, None)
+            except Exception:
+                actions = {"tasks": [], "meetings": [], "deadlines": []}
+            db.query(Action).filter_by(email_id=email.id).delete()
+            for t in actions.get("tasks", []):
+                db.add(Action(email_id=email.id, type="task", title=t.get("title", ""), when_datetime=None, status="open", snooze_until=None))
+            for m in actions.get("meetings", []):
+                db.add(Action(email_id=email.id, type="meeting", title=m.get("title", ""), when_datetime=None, status="open", snooze_until=None))
+            for d in actions.get("deadlines", []):
+                db.add(Action(email_id=email.id, type="deadline", title=d.get("title", ""), when_datetime=None, status="open", snooze_until=None))
+            db.commit()
+            results.append({"email_id": email.id, "actions": actions})
+        return results
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/email/{email_id}")
 def email_detail(email_id: int, db: Session = Depends(get_db)):
@@ -144,18 +237,11 @@ def email_detail(email_id: int, db: Session = Depends(get_db)):
     if not email:
         raise HTTPException(status_code=404)
     raw = email.body_text or email.snippet or ""
-    clean = clean_email_text(raw)
     return {
         "id": email.id,
         "sender": email.sender,
         "subject": email.subject,
         "received_at": email.received_at,
         "gmail_url": email.gmail_url,
-        "body_text": raw[:5000],
-        "clean_body": clean[:5000],
+        "body_text": raw[:5000]
     }
-
-@app.post("/api/test/generate", tags=["Test"])
-def test_generate(body: GenTestRequest):
-    s, model = generate_with_prompt(body.sender or "", body.subject or "", body.body or "", body.prompt)
-    return {"output": s, "model": model}
