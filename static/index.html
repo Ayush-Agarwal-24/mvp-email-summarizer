@@ -14,6 +14,7 @@
     <div class="right">
       <span id="user"></span>
       <a id="connect" class="btn" href="/auth/google/login">Connect Gmail</a>
+      <button id="logout" class="btn">Logout</button>
       <button id="refresh" class="btn">Refresh</button>
       <button id="markAll" class="btn">Mark All Read</button>
       <button id="sumAll" class="btn">Summarize All</button>
@@ -51,6 +52,11 @@
       <button data-filter="tasks" class="tab">Tasks</button>
       <button data-filter="meetings" class="tab">Meetings</button>
       <button data-filter="deadlines" class="tab">Deadlines</button>
+      <button data-filter="contacts" class="tab">Contacts</button>
+      <button data-filter="links" class="tab">Links</button>
+      <button data-filter="phone_numbers" class="tab">Phone Numbers</button>
+      <button data-filter="locations" class="tab">Locations</button>
+      <button data-filter="follow_ups" class="tab">Follow Ups</button>
     </div>
     <div id="status" class="status"></div>
     <div id="list" class="list"></div>
@@ -58,11 +64,6 @@
   <div id="modal" class="modal hidden">
     <div class="modal-body">
       <div id="modal-content"></div>
-      <div class="modal-actions">
-        <button id="modal-import" class="btn">Import Actions</button>
-        <button id="modal-copy" class="btn">Copy Summary</button>
-        <button id="modal-close" class="btn">Close</button>
-      </div>
     </div>
   </div>
   <script src="/static/app.js"></script>

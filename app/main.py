@@ -13,12 +13,18 @@ from .hf import generate_with_prompt, extract_actions_llm
 import json
 import traceback
 
+PRIMARY_MODEL = "openai/gpt-oss-20b:together"
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 add_session(app)
 app.include_router(auth_router)
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.post("/auth/logout")
+def logout(request: Request):
+    request.session.clear()
+    return {"success": True}
 
 def get_db():
     db = SessionLocal()
@@ -215,8 +221,10 @@ def extract_all_actions(request: Request, db: Session = Depends(get_db)):
             src = email.body_text or email.snippet or ""
             try:
                 actions = extract_actions_llm(email.sender or "", email.subject or "", src, None)
+                if not isinstance(actions, dict):
+                    actions = {k: [] for k in ["tasks", "meetings", "deadlines", "contacts", "links", "phone_numbers", "locations", "follow_ups"]}
             except Exception:
-                actions = {"tasks": [], "meetings": [], "deadlines": []}
+                actions = {k: [] for k in ["tasks", "meetings", "deadlines", "contacts", "links", "phone_numbers", "locations", "follow_ups"]}
             db.query(Action).filter_by(email_id=email.id).delete()
             for t in actions.get("tasks", []):
                 db.add(Action(email_id=email.id, type="task", title=t.get("title", ""), when_datetime=None, status="open", snooze_until=None))

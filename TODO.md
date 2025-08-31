@@ -1,0 +1,6 @@
+- [ ] Revamp extract actions logic to extract more actionable items (e.g., contacts, links, phone numbers, locations, follow-ups, etc.)
+- [ ] Ensure the search bar at the top of the frontend filters emails as the user types
+- [ ] Implement "Import Actions" button in the summary details modal (e.g., add actions to a task manager or mark as done)
+- [ ] Implement "Copy Summary" button in the summary details modal (copy summary text to clipboard)
+- [ ] Add a logout button to the UI and wire it to the backend/session
+- [ ] Test all new features and UI flows
