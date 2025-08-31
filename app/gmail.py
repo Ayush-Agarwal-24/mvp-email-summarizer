@@ -24,20 +24,30 @@ def gmail_service(creds: Credentials):
 def extract_plain(payload) -> Optional[str]:
     if not payload:
         return None
-    mime = payload.get("mimeType")
-    data = payload.get("body", {}).get("data")
-    parts = payload.get("parts")
-    if mime == "text/plain" and data:
-        return base64.urlsafe_b64decode(data.encode()).decode(errors="ignore")
-    if mime == "text/html" and data:
-        html = base64.urlsafe_b64decode(data.encode()).decode(errors="ignore")
-        return BeautifulSoup(html, "html.parser").get_text(" ")
-    if parts:
-        for p in parts:
-            t = extract_plain(p)
-            if t:
-                return t
-    return None
+    out = []
+    def walk(p):
+        mime = p.get("mimeType")
+        data = p.get("body", {}).get("data")
+        parts = p.get("parts")
+        if mime == "text/plain" and data:
+            try:
+                out.append(base64.urlsafe_b64decode(data.encode()).decode(errors="ignore"))
+            except Exception:
+                pass
+        elif mime == "text/html" and data:
+            try:
+                html = base64.urlsafe_b64decode(data.encode()).decode(errors="ignore")
+                out.append(BeautifulSoup(html, "html.parser").get_text(" "))
+            except Exception:
+                pass
+        if parts:
+            for pp in parts:
+                walk(pp)
+    walk(payload)
+    if not out:
+        return None
+    txt = "\n\n".join([x for x in out if x and x.strip()])
+    return txt or None
 
 def gmail_link(message_id: str) -> str:
     return f"https://mail.google.com/mail/u/0/#all/{message_id}"

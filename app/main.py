@@ -5,12 +5,13 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from .session import add_session
 from .db import SessionLocal, engine
-from .models import Base, User, Email, Summary, Action
-from .schemas import SummarizeRequest, ActionCreate, ActionUpdate, ActionOut, EmailOut, SummaryOut, MarkBatchRequest
+from .models import Base, User, Email, Summary
+from .schemas import SummarizeRequest, EmailOut, SummaryOut, GenTestRequest
 from .auth import router as auth_router
 from .gmail import creds_from_session_token, gmail_service, extract_plain, gmail_link, parse_received
-from .hf import summarize, extract_actions, classify_email, clean_email_text
+from .hf import clean_email_text, generate_with_prompt
 import json
+import traceback
 
 Base.metadata.create_all(bind=engine)
 
@@ -113,183 +114,29 @@ def do_summarize(req: SummarizeRequest, db: Session = Depends(get_db)) -> Summar
     if not email:
         raise HTTPException(status_code=404)
     existing = db.query(Summary).filter_by(email_id=email.id).first()
-    if existing and (existing.summary_text or "").strip() and existing.created_at and existing.created_at > datetime.utcnow() - timedelta(hours=24):
-        return SummaryOut.from_orm(existing)
     src = email.body_text or email.snippet or ""
     try:
-        meta = classify_email(src)
+        s, model = generate_with_prompt(email.sender or "", email.subject or "", src, req.prompt)
+
+        # print(f"Email Sender {email.sender}, Subject {email.subject}, Body {src} -> Model {model} Prompt {req.prompt}")
     except Exception:
-        meta = {"category": "fyi", "tags": []}
-    try:
-        s = summarize(src)
-    except Exception:
-        s = ""
-    try:
-        actions = extract_actions(src)
-    except Exception:
-        actions = {"tasks": [], "meetings": [], "deadlines": []}
-    if isinstance(actions, dict):
-        actions["meta"] = meta
-    data = json.dumps(actions)
-    model = "bart-large-cnn + flan-t5-small"
+        traceback.print_exc()
+        s, model = "", ""
+    model = model or "mistralai/Mistral-7B-Instruct-v0.3"
     if existing:
         existing.summary_text = s
-        existing.actions_json = data
+        existing.actions_json = None
         existing.model_name = model
         existing.created_at = datetime.utcnow()
         db.commit()
         db.refresh(existing)
         return SummaryOut.from_orm(existing)
-    rec = Summary(email_id=email.id, summary_text=s, actions_json=data, model_name=model, created_at=datetime.utcnow())
+    rec = Summary(email_id=email.id, summary_text=s, actions_json=None, model_name=model, created_at=datetime.utcnow())
     db.add(rec)
     db.commit()
     db.refresh(rec)
     return SummaryOut.from_orm(rec)
 
-@app.post("/api/summary")
-def summary_only(req: SummarizeRequest, db: Session = Depends(get_db)) -> SummaryOut:
-    email = db.query(Email).filter_by(id=req.email_id).first()
-    if not email:
-        raise HTTPException(status_code=404)
-    existing = db.query(Summary).filter_by(email_id=email.id).first()
-    if existing and not req.force and (existing.summary_text or "").strip() and existing.created_at and existing.created_at > datetime.utcnow() - timedelta(hours=24):
-        return SummaryOut.from_orm(existing)
-    src = email.body_text or email.snippet or ""
-    try:
-        s = summarize(src)
-    except Exception:
-        s = ""
-    if existing:
-        existing.summary_text = s
-        existing.model_name = "bart-large-cnn"
-        existing.created_at = datetime.utcnow()
-        db.commit()
-        db.refresh(existing)
-        return SummaryOut.from_orm(existing)
-    rec = Summary(email_id=email.id, summary_text=s, actions_json=None, model_name="bart-large-cnn", created_at=datetime.utcnow())
-    db.add(rec)
-    db.commit()
-    db.refresh(rec)
-    return SummaryOut.from_orm(rec)
-
-@app.post("/api/summary/batch")
-def summary_only_batch(body: MarkBatchRequest, db: Session = Depends(get_db)):
-    ids = body.ids or []
-    done = 0
-    for eid in ids:
-        email = db.query(Email).filter_by(id=eid).first()
-        if not email:
-            continue
-        existing = db.query(Summary).filter_by(email_id=email.id).first()
-        if existing and not body.force and (existing.summary_text or "").strip() and existing.created_at and existing.created_at > datetime.utcnow() - timedelta(hours=24):
-            continue
-        src = email.body_text or email.snippet or ""
-        try:
-            s = summarize(src)
-        except Exception:
-            s = ""
-        if existing:
-            existing.summary_text = s
-            existing.model_name = "bart-large-cnn"
-            existing.created_at = datetime.utcnow()
-        else:
-            db.add(Summary(email_id=email.id, summary_text=s, actions_json=None, model_name="bart-large-cnn", created_at=datetime.utcnow()))
-        db.commit()
-        done += 1
-    return {"processed": done}
-
-@app.post("/api/actions/extract")
-def actions_extract(req: SummarizeRequest, db: Session = Depends(get_db)) -> SummaryOut:
-    email = db.query(Email).filter_by(id=req.email_id).first()
-    if not email:
-        raise HTTPException(status_code=404)
-    existing = db.query(Summary).filter_by(email_id=email.id).first()
-    if existing and not req.force and (existing.actions_json or "").strip() and existing.created_at and existing.created_at > datetime.utcnow() - timedelta(hours=24):
-        return SummaryOut.from_orm(existing)
-    src = email.body_text or email.snippet or ""
-    try:
-        acts = extract_actions(src)
-    except Exception:
-        acts = {"tasks": [], "meetings": [], "deadlines": []}
-    data = json.dumps(acts)
-    if existing:
-        existing.actions_json = data
-        existing.model_name = "bart-large-cnn + flan-t5-base"
-        existing.created_at = datetime.utcnow()
-        db.commit()
-        db.refresh(existing)
-        return SummaryOut.from_orm(existing)
-    rec = Summary(email_id=email.id, summary_text=None, actions_json=data, model_name="bart-large-cnn + flan-t5-base", created_at=datetime.utcnow())
-    db.add(rec)
-    db.commit()
-    db.refresh(rec)
-    return SummaryOut.from_orm(rec)
-
-@app.post("/api/actions/batch")
-def actions_extract_batch(body: MarkBatchRequest, db: Session = Depends(get_db)):
-    ids = body.ids or []
-    done = 0
-    for eid in ids:
-        email = db.query(Email).filter_by(id=eid).first()
-        if not email:
-            continue
-        existing = db.query(Summary).filter_by(email_id=email.id).first()
-        if existing and not body.force and (existing.actions_json or "").strip() and existing.created_at and existing.created_at > datetime.utcnow() - timedelta(hours=24):
-            continue
-        src = email.body_text or email.snippet or ""
-        try:
-            acts = extract_actions(src)
-        except Exception:
-            acts = {"tasks": [], "meetings": [], "deadlines": []}
-        data = json.dumps(acts)
-        if existing:
-            existing.actions_json = data
-            existing.model_name = "bart-large-cnn + flan-t5-base"
-            existing.created_at = datetime.utcnow()
-        else:
-            db.add(Summary(email_id=email.id, summary_text=None, actions_json=data, model_name="bart-large-cnn + flan-t5-base", created_at=datetime.utcnow()))
-        db.commit()
-        done += 1
-    return {"processed": done}
-
-@app.post("/api/summarize/batch")
-def do_summarize_batch(body: MarkBatchRequest, db: Session = Depends(get_db)):
-    ids = body.ids or []
-    done = 0
-    for eid in ids:
-        email = db.query(Email).filter_by(id=eid).first()
-        if not email:
-            continue
-        existing = db.query(Summary).filter_by(email_id=email.id).first()
-        if existing and (existing.summary_text or "").strip() and existing.created_at and existing.created_at > datetime.utcnow() - timedelta(hours=24):
-            continue
-        src = email.body_text or email.snippet or ""
-        try:
-            meta = classify_email(src)
-        except Exception:
-            meta = {"category": "fyi", "tags": []}
-        try:
-            s = summarize(src)
-        except Exception:
-            s = ""
-        try:
-            actions = extract_actions(src)
-        except Exception:
-            actions = {"tasks": [], "meetings": [], "deadlines": []}
-        if isinstance(actions, dict):
-            actions["meta"] = meta
-        data = json.dumps(actions)
-        model = "bart-large-cnn + flan-t5-small"
-        if existing:
-            existing.summary_text = s
-            existing.actions_json = data
-            existing.model_name = model
-            existing.created_at = datetime.utcnow()
-        else:
-            db.add(Summary(email_id=email.id, summary_text=s, actions_json=data, model_name=model, created_at=datetime.utcnow()))
-        db.commit()
-        done += 1
-    return {"processed": done}
 
 @app.get("/api/email/{email_id}")
 def email_detail(email_id: int, db: Session = Depends(get_db)):
@@ -308,141 +155,7 @@ def email_detail(email_id: int, db: Session = Depends(get_db)):
         "clean_body": clean[:5000],
     }
 
-@app.get("/api/items")
-def list_actions(type: str | None = None, status: str | None = None, db: Session = Depends(get_db)):
-    q = db.query(Action)
-    if type:
-        q = q.filter(Action.type == type)
-    if status:
-        q = q.filter(Action.status == status)
-    return [ActionOut.from_orm(x).dict() for x in q.order_by(Action.id.desc()).all()]
-
-@app.post("/api/items")
-def create_action(body: ActionCreate, db: Session = Depends(get_db)):
-    email = db.query(Email).filter_by(id=body.email_id).first()
-    if not email:
-        raise HTTPException(status_code=404)
-    rec = Action(email_id=email.id, type=body.type, title=body.title, when_datetime=body.when_datetime, status="open")
-    db.add(rec)
-    db.commit()
-    db.refresh(rec)
-    return ActionOut.from_orm(rec).dict()
-
-@app.patch("/api/items/{item_id}")
-def update_action(item_id: int, body: ActionUpdate, db: Session = Depends(get_db)):
-    rec = db.query(Action).filter_by(id=item_id).first()
-    if not rec:
-        raise HTTPException(status_code=404)
-    if body.status is not None:
-        rec.status = body.status
-    if body.snooze_until is not None:
-        rec.snooze_until = body.snooze_until
-    db.commit()
-    db.refresh(rec)
-    return ActionOut.from_orm(rec).dict()
-
-@app.post("/api/actions/import")
-def import_actions(body: SummarizeRequest, db: Session = Depends(get_db)):
-    email = db.query(Email).filter_by(id=body.email_id).first()
-    if not email:
-        raise HTTPException(status_code=404)
-    summ = db.query(Summary).filter_by(email_id=email.id).first()
-    if not summ:
-        src = email.body_text or email.snippet or ""
-        try:
-            meta = classify_email(src)
-        except Exception:
-            meta = {"category": "fyi", "tags": []}
-        try:
-            s = summarize(src)
-        except Exception:
-            s = ""
-        try:
-            acts = extract_actions(src)
-        except Exception:
-            acts = {"tasks": [], "meetings": [], "deadlines": []}
-        if isinstance(acts, dict):
-            acts["meta"] = meta
-        summ = Summary(email_id=email.id, summary_text=s, actions_json=json.dumps(acts), model_name="bart-large-cnn + flan-t5-small", created_at=datetime.utcnow())
-        db.add(summ)
-        db.commit()
-        db.refresh(summ)
-    try:
-        data = json.loads(summ.actions_json or "{}")
-    except Exception:
-        data = {"tasks": [], "meetings": [], "deadlines": []}
-    created = []
-    for t in data.get("tasks", []) or []:
-        title = t.get("title")
-        if not title:
-            continue
-        exists = db.query(Action).filter_by(email_id=email.id, type="task", title=title).first()
-        if exists:
-            continue
-        rec = Action(email_id=email.id, type="task", title=title, status="open")
-        db.add(rec)
-        db.flush()
-        created.append(rec)
-    for m in data.get("meetings", []) or []:
-        title = m.get("title")
-        if not title:
-            continue
-        exists = db.query(Action).filter_by(email_id=email.id, type="meeting", title=title).first()
-        if exists:
-            continue
-        rec = Action(email_id=email.id, type="meeting", title=title, status="open")
-        db.add(rec)
-        db.flush()
-        created.append(rec)
-    for d in data.get("deadlines", []) or []:
-        title = d.get("title")
-        if not title:
-            continue
-        exists = db.query(Action).filter_by(email_id=email.id, type="deadline", title=title).first()
-        if exists:
-            continue
-        rec = Action(email_id=email.id, type="deadline", title=title, status="open")
-        db.add(rec)
-        db.flush()
-        created.append(rec)
-    db.commit()
-    return {"created": len(created)}
-
-@app.post("/api/gmail/mark_read")
-def gmail_mark_read(body: SummarizeRequest, request: Request, db: Session = Depends(get_db)):
-    token = request.session.get("token")
-    if not token:
-        raise HTTPException(status_code=401)
-    email = db.query(Email).filter_by(id=body.email_id).first()
-    if not email:
-        raise HTTPException(status_code=404)
-    try:
-        creds = creds_from_session_token(token)
-        svc = gmail_service(creds)
-        svc.users().messages().modify(userId="me", id=email.message_id, body={"removeLabelIds": ["UNREAD"]}).execute()
-        return {"ok": True}
-    except Exception:
-        raise HTTPException(status_code=403)
-
-@app.post("/api/gmail/mark_read_batch")
-def gmail_mark_read_batch(body: MarkBatchRequest, request: Request, db: Session = Depends(get_db)):
-    token = request.session.get("token")
-    if not token:
-        raise HTTPException(status_code=401)
-    ids = body.ids or []
-    try:
-        creds = creds_from_session_token(token)
-        svc = gmail_service(creds)
-        n = 0
-        for eid in ids:
-            email = db.query(Email).filter_by(id=eid).first()
-            if not email:
-                continue
-            try:
-                svc.users().messages().modify(userId="me", id=email.message_id, body={"removeLabelIds": ["UNREAD"]}).execute()
-                n += 1
-            except Exception:
-                pass
-        return {"updated": n}
-    except Exception:
-        raise HTTPException(status_code=403)
+@app.post("/api/test/generate", tags=["Test"])
+def test_generate(body: GenTestRequest):
+    s, model = generate_with_prompt(body.sender or "", body.subject or "", body.body or "", body.prompt)
+    return {"output": s, "model": model}
