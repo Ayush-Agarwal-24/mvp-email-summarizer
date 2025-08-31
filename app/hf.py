@@ -88,7 +88,6 @@ def extract_actions_llm(sender: str, subject: str, body: str, prompt: str | None
     out = hf_openai_post(p, model=PRIMARY_MODEL, temperature=0.2)
     try:
         if not out or not isinstance(out, str):
-            print("EXTRACT ACTIONS: LLM response is empty or not a string")
             return {k: [] for k in ["tasks", "meetings", "deadlines", "contacts", "links", "phone_numbers", "locations", "follow_ups"]}
         data = json.loads(out)
         if isinstance(data, dict):
@@ -102,7 +101,6 @@ def extract_actions_llm(sender: str, subject: str, body: str, prompt: str | None
                     ]
             return data
     except Exception as e:
-        print(f"EXTRACT ACTIONS JSON ERROR: {e}")
         import re
         match = re.search(r"\{.*\}", out, re.DOTALL)
         if match:
